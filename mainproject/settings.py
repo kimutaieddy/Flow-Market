@@ -112,7 +112,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AFRICASTALKING_USERNAME = 'sandbox'
 
 # Paste your API Key here (from the dashboard)
-AFRICASTALKING_API_KEY = 'your_api_key_here'
+AFRICASTALKING_API_KEY = 'atsk_02011e70f31a1670d57f4ae1d8d22cc31efc7191dfea31cb63407a3bec89f29db2444612'
 
 # SMS Sender ID (optional - for sandbox, this is auto-assigned)
 AFRICASTALKING_SENDER_ID = 'MSEM'

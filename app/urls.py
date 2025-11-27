@@ -14,4 +14,7 @@ urlpatterns = [
     
     # Manual SMS campaign trigger - can be accessed via browser
     path('send-campaign/', views.send_campaign_view, name='send_campaign'),
+
+    # Products API endpoint
+    path('products/', views.products_list, name='products_list'),
 ]

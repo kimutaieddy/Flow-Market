@@ -1,6 +1,6 @@
-# Django + Africa's Talking USSD & SMS Project
+# FlowMarket - USSD SMS Marketing Platform
 
-A simple Django application for USSD menu and SMS campaign management using Africa's Talking API.
+A complete Django application for USSD-based SMS campaign management using Africa's Talking API.
 
 ## 🚀 Quick Start Guide
 
@@ -50,16 +50,17 @@ The server will run at: `http://localhost:8000`
 
 ## 📱 USSD Menu Flow
 
-```
-CON Welcome to MSEM Service
-1. Contacts Count
-2. Send Promo SMS
-3. Exit
+**Dial**: `*384*10688#`
 
-Option 1 → Shows total contacts
-Option 2 → Sends SMS to all contacts
-Option 3 → Exits the menu
 ```
+FlowMarket Main Menu:
+1. Create Campaign    - Create and save SMS campaign templates
+2. Send Campaign      - Send campaigns to contact lists
+3. Create New List    - Information about CSV upload
+4. View Saved List    - View contact lists and details
+```
+
+**Full USSD Journey Documentation**: See [USSD_GUIDE.md](USSD_GUIDE.md) for complete flow details.
 
 ## 🔧 Project Structure
 
@@ -68,6 +69,8 @@ Flow-Market/
 ├── manage.py
 ├── requirements.txt
 ├── README.md
+├── USSD_GUIDE.md              # Complete USSD flow documentation
+├── IMPLEMENTATION_SUMMARY.md   # Detailed implementation guide
 ├── mainproject/
 │   ├── __init__.py
 │   ├── settings.py
@@ -75,30 +78,61 @@ Flow-Market/
 │   └── wsgi.py
 └── app/
     ├── __init__.py
-    ├── models.py      # Contact and Campaign models
-    ├── views.py       # USSD and SMS endpoints
-    ├── urls.py        # App routing
-    ├── admin.py       # Django admin configuration
+    ├── models.py              # Contact, Product, CampaignTemplate, ContactList, SentCampaign
+    ├── views.py               # USSD logic, API endpoints
+    ├── urls.py                # App routing
+    ├── admin.py               # Django admin for all models
+    ├── serializer.py          # Product serializer
     └── migrations/
 ```
 
-## 📊 Managing Contacts
+## 📊 Managing Data
 
-1. Access Django Admin: `http://localhost:8000/admin/`
-2. Login with your superuser credentials
-3. Add contacts with phone numbers (format: +254XXXXXXXXX)
+### Via Django Admin (`http://localhost:8000/admin/`)
+
+1. **Contacts** - Add contacts with phone numbers (+254XXXXXXXXX format)
+2. **Contact Lists** - Group contacts (e.g., "VIP Contacts", "Test List")
+3. **Campaign Templates** - Pre-created SMS campaigns
+4. **Sent Campaigns** - View history of sent campaigns
+5. **Products** - Manage product catalog
+
+### Via USSD (`*384*10688#`)
+
+1. **Create campaigns** - Via option 1
+2. **Send campaigns** - Via option 2
+3. **View lists** - Via option 4
 
 ## 🔗 API Endpoints
 
+- **Home Page**: `http://localhost:8000/` - Dashboard with stats
 - **USSD Webhook**: `POST /ussd/` - Handles USSD menu interactions
-- **Send SMS Campaign**: `GET /send-campaign/` - Sends bulk SMS to all contacts
+- **Products API**: `GET /products/` - Returns products as JSON
+- **Send Campaign**: `GET /send-campaign/` - Manual bulk SMS trigger
+- **Admin Panel**: `http://localhost:8000/admin/` - Data management
 
 ## 📝 Testing
 
-1. Add some contacts via Django Admin
-2. Dial the USSD code from your Africa's Talking sandbox
-3. Navigate through the menu
-4. Option 2 will trigger SMS sending to all contacts
+### 1. Add Sample Data (Django Admin)
+1. Create contact lists: "All Contacts", "VIP Contacts", "Test List"
+2. Add contacts to lists with phone numbers
+3. Create campaign templates with sample messages
+
+### 2. Test USSD Flow
+1. Dial `*384*10688#` from your phone
+2. Navigate through the menu
+3. Create a campaign (Option 1)
+4. Send a campaign (Option 2) to your Test List
+
+### 3. Monitor Results
+- Check sent campaigns in Django Admin
+- View Africa's Talking dashboard for delivery status
+- Check Django server logs for debugging
+
+## 📚 Documentation
+
+- **[USSD_GUIDE.md](USSD_GUIDE.md)** - Complete USSD flow walkthrough with examples
+- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
+- **This README** - Quick start and setup guide
 
 ## 🛠️ Troubleshooting
 
