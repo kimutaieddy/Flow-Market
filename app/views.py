@@ -28,301 +28,367 @@ ussd_sessions = {}
 @csrf_exempt
 def ussd_callback(request):
     """
-    USSD Webhook endpoint - receives requests from Africa's Talking
-    
-    FlowMarket USSD Journey:
-    1. Welcome screen with main menu options
-    2. Create Campaign - save SMS campaign template
-    3. Send Campaign - select campaign and contact list to send
-    4. Create New List - info about uploading via web/app
-    5. View Saved List - view existing contact lists
-    
-    Africa's Talking sends these parameters:
-    - sessionId: Unique session ID
-    - serviceCode: Your USSD code
-    - phoneNumber: User's phone number
-    - text: User's input (empty on first request)
+    USSD Webhook endpoint - receives requests from Africa's Talking.
+
+    FlowMarket Customer Journey:
+
+    1️⃣ Main Menu
+      - Create Campaign
+      - Send Campaign
+      - View Contact Lists
+      - Customer Support
+
+    2️⃣ Create Campaign
+      - Enter campaign message
+      - Enter campaign name
+      - Confirm and save
+
+    3️⃣ Send Campaign
+      - Select campaign
+      - Select contact list
+      - Preview message
+      - Confirm and send
+
+    4️⃣ View Contact Lists
+      - Show available lists
+
+    5️⃣ Customer Support
+      - Show contact info
     """
-    if request.method == 'POST':
-        # Get parameters from Africa's Talking
-        session_id = request.POST.get('sessionId', '')
-        service_code = request.POST.get('serviceCode', '')
-        phone_number = request.POST.get('phoneNumber', '')
-        text = request.POST.get('text', '')
-        
-        # Split the text to get navigation path
-        text_array = text.split('*') if text else []
-        
-        # Initialize session storage if not exists
-        if session_id not in ussd_sessions:
-            ussd_sessions[session_id] = {}
-        
-        session_data = ussd_sessions[session_id]
-        
-        # Response string - starts with CON (continue) or END (finish)
-        response = ""
-        
-        # =====================================================
-        # MAIN MENU - Welcome Screen
-        # =====================================================
-        if text == '':
-            response = "CON Welcome to FlowMarket. Please select:\n"
-            response += "1. Create Campaign\n"
-            response += "2. Send Campaign\n"
-            response += "3. Create New List (Upload via CSV)\n"
-            response += "4. View Saved List"
-        
-        # =====================================================
-        # OPTION 1: CREATE CAMPAIGN
-        # =====================================================
-        elif text == '1':
-            # Show input screen for campaign text
-            response = "CON Input text of your campaign:\n"
-            response += "(e.g., Hello [Name], we have amazing products...)\n\n"
-            response += "1. Cancel"
-            session_data['action'] = 'create_campaign'
-        
-        elif text.startswith('1*') and session_data.get('action') == 'create_campaign':
-            user_input = text.split('*', 1)[1]
-            
-            if user_input == '1':
-                # Cancel - back to main menu
-                response = "CON Welcome to FlowMarket. Please select:\n"
-                response += "1. Create Campaign\n"
-                response += "2. Send Campaign\n"
-                response += "3. Create New List (Upload via CSV)\n"
-                response += "4. View Saved List"
-                session_data.clear()
-            else:
-                # Save campaign message temporarily
-                session_data['campaign_message'] = user_input
-                response = "CON Enter campaign name:\n"
-                response += "1. Cancel\n"
-                response += "2. Save"
-        
-        elif text.count('*') >= 2 and session_data.get('action') == 'create_campaign':
-            parts = text.split('*')
-            user_input = parts[-1]
-            
-            if user_input == '1':
-                # Cancel
-                response = "END Campaign creation cancelled."
-                session_data.clear()
-            elif user_input == '2':
-                # Save the campaign
-                campaign_message = session_data.get('campaign_message', '')
-                campaign_name = parts[-2] if len(parts) >= 3 else 'Untitled Campaign'
-                
-                # Create campaign template
-                CampaignTemplate.objects.create(
-                    name=campaign_name,
-                    message=campaign_message,
-                    created_by=phone_number
-                )
-                
-                response = "END Your campaign has been successfully created and saved."
-                session_data.clear()
-            else:
-                # Treat as campaign name
-                session_data['campaign_name'] = user_input
-                response = "CON Confirm:\n"
-                response += "1. Cancel\n"
-                response += "2. Save"
-        
-        # =====================================================
-        # OPTION 2: SEND CAMPAIGN
-        # =====================================================
-        elif text == '2':
-            # Show list of saved campaigns
-            campaigns = CampaignTemplate.objects.filter(is_active=True)[:3]
-            
-            if not campaigns:
-                response = "END No campaigns available. Please create a campaign first."
-            else:
-                response = "CON Please select a campaign:\n"
-                for idx, campaign in enumerate(campaigns, 1):
-                    response += f"{idx}. {campaign.name}\n"
-                response += f"{len(campaigns) + 1}. Cancel"
-                session_data['action'] = 'send_campaign'
-                session_data['campaigns'] = [c.id for c in campaigns]
-        
-        elif text.startswith('2*') and session_data.get('action') == 'send_campaign':
-            parts = text.split('*')
-            
-            if len(parts) == 2:
-                # User selected a campaign
-                selection = parts[1]
-                campaigns_ids = session_data.get('campaigns', [])
-                
-                try:
-                    selection_idx = int(selection) - 1
-                    if selection_idx == len(campaigns_ids):
-                        # Cancel option
-                        response = "END Campaign sending cancelled."
-                        session_data.clear()
-                    elif 0 <= selection_idx < len(campaigns_ids):
-                        # Valid campaign selected
-                        campaign_id = campaigns_ids[selection_idx]
-                        session_data['selected_campaign_id'] = campaign_id
-                        
-                        # Show contact lists
-                        contact_lists = ContactList.objects.filter(is_active=True)
-                        
-                        response = "CON Select Contacts to receive campaign:\n"
-                        for idx, clist in enumerate(contact_lists, 1):
-                            response += f"{idx}. {clist.name} ({clist.contact_count()})\n"
-                        response += f"{len(contact_lists) + 1}. Cancel"
-                        session_data['contact_lists'] = [cl.id for cl in contact_lists]
-                    else:
-                        response = "END Invalid selection."
-                        session_data.clear()
-                except ValueError:
-                    response = "END Invalid input."
-                    session_data.clear()
-            
-            elif len(parts) == 3:
-                # User selected a contact list
-                selection = parts[2]
-                contact_lists_ids = session_data.get('contact_lists', [])
-                
-                try:
-                    selection_idx = int(selection) - 1
-                    if selection_idx == len(contact_lists_ids):
-                        # Cancel option
-                        response = "END Campaign sending cancelled."
-                        session_data.clear()
-                    elif 0 <= selection_idx < len(contact_lists_ids):
-                        # Valid list selected
-                        contact_list_id = contact_lists_ids[selection_idx]
-                        session_data['selected_list_id'] = contact_list_id
-                        
-                        # Get campaign and show preview
-                        campaign = CampaignTemplate.objects.get(id=session_data['selected_campaign_id'])
-                        contact_list = ContactList.objects.get(id=contact_list_id)
-                        
-                        # Show preview (first 100 chars)
-                        preview = campaign.message[:100] + '...' if len(campaign.message) > 100 else campaign.message
-                        
-                        response = "CON Confirm message preview and send:\n"
-                        response += f"\"{preview}\"\n\n"
-                        response += "1. Send now\n"
-                        response += "2. Cancel"
-                    else:
-                        response = "END Invalid selection."
-                        session_data.clear()
-                except (ValueError, CampaignTemplate.DoesNotExist, ContactList.DoesNotExist):
-                    response = "END Invalid selection."
-                    session_data.clear()
-            
-            elif len(parts) == 4:
-                # User confirmed or cancelled sending
-                selection = parts[3]
-                
-                if selection == '1':
-                    # Send now
-                    try:
-                        campaign = CampaignTemplate.objects.get(id=session_data['selected_campaign_id'])
-                        contact_list = ContactList.objects.get(id=session_data['selected_list_id'])
-                        
-                        # Send SMS to all contacts in the list
-                        result = send_campaign_to_list(campaign, contact_list, phone_number)
-                        
-                        if result['success']:
-                            response = f"END Campaign sent successfully to {result['count']} contacts!"
-                        else:
-                            response = f"END Failed to send: {result['message']}"
-                    except Exception as e:
-                        response = f"END Error: {str(e)}"
-                    
-                    session_data.clear()
-                elif selection == '2':
-                    # Cancel
-                    response = "END Campaign sending cancelled."
-                    session_data.clear()
-                else:
-                    response = "END Invalid selection."
-                    session_data.clear()
-        
-        # =====================================================
-        # OPTION 3: CREATE NEW LIST
-        # =====================================================
-        elif text == '3':
-            response = "CON Upload on FlowMarket Web Portal/App.\n\n"
-            response += "1. OK\n"
-            response += "2. Cancel"
-            session_data['action'] = 'create_list'
-        
-        elif text.startswith('3*') and session_data.get('action') == 'create_list':
-            selection = text.split('*')[1]
-            if selection == '1':
-                response = "END We will notify you once your list is uploaded."
-            else:
-                response = "END Cancelled."
-            session_data.clear()
-        
-        # =====================================================
-        # OPTION 4: VIEW SAVED LIST
-        # =====================================================
-        elif text == '4':
-            # Show all saved contact lists
-            contact_lists = ContactList.objects.filter(is_active=True)
-            
-            if not contact_lists:
-                response = "END No saved lists available."
-            else:
-                response = "CON Select list to view:\n"
-                for idx, clist in enumerate(contact_lists, 1):
-                    response += f"{idx}. {clist.name} ({clist.contact_count()})\n"
-                response += f"{len(contact_lists) + 1}. Back to main menu"
-                session_data['action'] = 'view_list'
-                session_data['lists'] = [cl.id for cl in contact_lists]
-        
-        elif text.startswith('4*') and session_data.get('action') == 'view_list':
-            selection = text.split('*')[1]
-            lists_ids = session_data.get('lists', [])
-            
-            try:
-                selection_idx = int(selection) - 1
-                if selection_idx == len(lists_ids):
-                    # Back to main menu
-                    response = "CON Welcome to FlowMarket. Please select:\n"
-                    response += "1. Create Campaign\n"
-                    response += "2. Send Campaign\n"
-                    response += "3. Create New List (Upload via CSV)\n"
-                    response += "4. View Saved List"
-                    session_data.clear()
-                elif 0 <= selection_idx < len(lists_ids):
-                    # Show list details
-                    contact_list = ContactList.objects.get(id=lists_ids[selection_idx])
-                    response = f"END {contact_list.name}\n"
-                    response += f"Total: {contact_list.contact_count()} contacts\n"
-                    response += f"Description: {contact_list.description or 'N/A'}"
-                    session_data.clear()
-                else:
-                    response = "END Invalid selection."
-                    session_data.clear()
-            except (ValueError, ContactList.DoesNotExist):
-                response = "END Invalid selection."
-                session_data.clear()
-        
-        # =====================================================
-        # DEFAULT: INVALID INPUT
-        # =====================================================
-        else:
-            response = "END Invalid input. Please dial again."
-            session_data.clear()
-        
-        # Return response to Africa's Talking
-        return HttpResponse(response, content_type='text/plain')
-    
-    else:
-        # If not POST, return error
+    if request.method != 'POST':
         return HttpResponse("This endpoint only accepts POST requests", status=405)
+
+    # Get POST params from Africa's Talking
+    session_id = request.POST.get('sessionId', '')
+    phone_number = request.POST.get('phoneNumber', '')
+    text = request.POST.get('text', '')
+
+    # Initialize USSD session
+    if session_id not in ussd_sessions:
+        ussd_sessions[session_id] = {}
+    session_data = ussd_sessions[session_id]
+
+    # Split user input for navigation
+    text_array = text.split('*') if text else []
+
+    response = ""  # Default response
+
+    # ==========================
+    # MAIN MENU
+    # ==========================
+    if text == '':
+        response = "CON Welcome to FlowMarket!\nSelect an option:\n"
+        response += "1. Create Campaign\n"
+        response += "2. Send Campaign\n"
+        response += "3. View Contact Lists\n"
+        response += "4. Customer Support"
+        session_data.clear()  # Reset session
+
+    # ==========================
+    # CREATE CAMPAIGN FLOW
+    # ==========================
+    elif text.startswith('1'):
+        response = handle_create_campaign_flow(text_array, session_data, phone_number)
+
+    # ==========================
+    # SEND CAMPAIGN FLOW
+    # ==========================
+    elif text.startswith('2'):
+        response = handle_send_campaign_flow(text_array, session_data, phone_number)
+
+    # ==========================
+    # VIEW CONTACT LISTS
+    # ==========================
+    elif text.startswith('3'):
+        response = handle_view_contact_lists(text_array, session_data)
+
+    # ==========================
+    # CUSTOMER SUPPORT
+    # ==========================
+    elif text.startswith('4'):
+        response = "END Contact us:\nEmail: support@flowmarket.com\nPhone: +1234567890"
+
+    # ==========================
+    # INVALID INPUT
+    # ==========================
+    else:
+        response = "END Invalid input. Please dial again."
+        session_data.clear()
+
+    return HttpResponse(response, content_type='text/plain')
+
+
+# ==========================
+# Helper functions for USSD flows
+# ==========================
+def handle_create_campaign_flow(text_array, session_data, phone_number):
+    """
+    Handles the "Create Campaign" journey
+    """
+    step = len(text_array)
+
+    if step == 1:
+        session_data['action'] = 'create_campaign'
+        return "CON Create campaign \n" \
+               " input text of your campaign"
+
+    elif step == 2:
+        # User entered campaign message
+        session_data['campaign_message'] = text_array[-1]
+        return "CON Enter campaign name"
+
+    elif step == 3:
+        # User entered campaign name
+        campaign_message = session_data.get('campaign_message', '')
+        campaign_name = text_array[-1] or 'Untitled Campaign'
+
+        # Save CampaignTemplate
+        CampaignTemplate.objects.create(
+            name=campaign_name,
+            message=campaign_message,
+            created_by=phone_number
+        )
+        session_data.clear()
+        return "END  Campaign created successfully!"
+
+
+def handle_send_campaign_flow(text_array, session_data, phone_number):
+    """
+    Handles the "Send Campaign" journey
+    """
+    step = len(text_array)
+
+    # Step 1: Show campaigns
+    if step == 1:
+        campaigns = CampaignTemplate.objects.filter(is_active=True)[:5]
+        if not campaigns:
+            return "END No campaigns available. Create one first."
+
+        session_data['action'] = 'send_campaign'
+        session_data['campaigns'] = [c.id for c in campaigns]
+        response = "CON Select a campaign:\n"
+        for idx, c in enumerate(campaigns, 1):
+            response += f"{idx}. {c.name}\n"
+        response += f"{len(campaigns) + 1}. Cancel"
+        return response
+
+    # Step 2: Select campaign and show contact lists
+    elif step == 2:
+        try:
+            selection = int(text_array[-1]) - 1
+            campaigns_ids = session_data.get('campaigns', [])
+            if selection == len(campaigns_ids):
+                session_data.clear()
+                return "END Campaign sending cancelled."
+            campaign_id = campaigns_ids[selection]
+            session_data['selected_campaign_id'] = campaign_id
+
+            # Show contact lists
+            contact_lists = ContactList.objects.filter(is_active=True)
+            if not contact_lists:
+                return "END No contact lists available. Create one first."
+
+            session_data['contact_lists'] = [cl.id for cl in contact_lists]
+            response = "CON Select a contact list:\n"
+            for idx, cl in enumerate(contact_lists, 1):
+                response += f"{idx}. {cl.name} ({cl.contact_count()})\n"
+            response += f"{len(contact_lists) + 1}. Cancel"
+            return response
+        except (ValueError, IndexError):
+            session_data.clear()
+            return "END Invalid selection."
+
+    # Step 3: Preview message and confirm
+    elif step == 3:
+        try:
+            selection = int(text_array[-1]) - 1
+            contact_lists_ids = session_data.get('contact_lists', [])
+            if selection == len(contact_lists_ids):
+                session_data.clear()
+                return "END Campaign sending cancelled."
+            contact_list_id = contact_lists_ids[selection]
+            session_data['selected_list_id'] = contact_list_id
+
+            # Show preview
+            campaign = CampaignTemplate.objects.get(id=session_data['selected_campaign_id'])
+            preview = campaign.message[:100] + '...' if len(campaign.message) > 100 else campaign.message
+            return f"CON Preview message:\n\"{preview}\"\n\n1. Send Now\n2. Cancel"
+        except Exception:
+            session_data.clear()
+            return "END Invalid selection."
+
+    # Step 4: Send campaign
+    elif step == 4:
+        choice = text_array[-1]
+        if choice == '1':
+            try:
+                campaign = CampaignTemplate.objects.get(id=session_data['selected_campaign_id'])
+                contact_list = ContactList.objects.get(id=session_data['selected_list_id'])
+                result = send_campaign_to_list(campaign, contact_list, phone_number)
+                session_data.clear()
+                if result['success']:
+                    return f"END ✅ Campaign sent to {result['count']} contacts."
+                else:
+                    return f"END ❌ Failed to send: {result['message']}"
+            except Exception as e:
+                session_data.clear()
+                return f"END ❌ Error: {str(e)}"
+        elif choice == '2':
+            session_data.clear()
+            return "END Campaign sending cancelled."
+        else:
+            session_data.clear()
+            return "END Invalid selection."
+
+
+def handle_view_contact_lists(text_array, session_data):
+    """
+    Handles the "View Contact Lists" journey
+    """
+    step = len(text_array)
+
+    # Step 1: Show all contact lists
+    if step == 1:
+        contact_lists = ContactList.objects.filter(is_active=True)
+        if not contact_lists:
+            return "END No contact lists available."
+
+        session_data['action'] = 'view_lists'
+        session_data['lists'] = [cl.id for cl in contact_lists]
+        response = "CON Select a list to view:\n"
+        for idx, cl in enumerate(contact_lists, 1):
+            response += f"{idx}. {cl.name} ({cl.contact_count()})\n"
+        response += f"{len(contact_lists) + 1}. Back to Main Menu"
+        return response
+
+    # Step 2: Show list details
+    elif step == 2:
+        try:
+            selection = int(text_array[-1]) - 1
+            lists_ids = session_data.get('lists', [])
+            if selection == len(lists_ids):
+                session_data.clear()
+                return "CON Welcome to FlowMarket!\nSelect an option:\n1. Create Campaign\n2. Send Campaign\n3. View Contact Lists\n4. Customer Support"
+            
+            contact_list = ContactList.objects.get(id=lists_ids[selection])
+            session_data.clear()
+            return f"END {contact_list.name}\nTotal: {contact_list.contact_count()} contacts\nDescription: {contact_list.description or 'N/A'}"
+        except (ValueError, IndexError, ContactList.DoesNotExist):
+            session_data.clear()
+            return "END Invalid selection."
+
+
+# ==========================
+# SMS Sending Functions
+# ==========================
+def send_campaign_to_list(campaign_template, contact_list, sent_by_phone):
+    """
+    Send a campaign to a specific contact list
+    
+    Args:
+        campaign_template: CampaignTemplate object
+        contact_list: ContactList object
+        sent_by_phone: Phone number of user sending the campaign
+    
+    Returns:
+        Dictionary with success status and details
+    """
+    message = None
+    recipients = []
+    
+    try:
+        # Get all active contacts in the list
+        contacts = contact_list.contacts.filter(is_active=True)
+        
+        if not contacts.exists():
+            return {
+                'success': False,
+                'message': 'No active contacts in this list',
+                'count': 0
+            }
+        
+        # Get phone numbers and validate format
+        for contact in contacts:
+            phone = contact.phone_number.strip()
+            # Ensure phone number starts with +254
+            if not phone.startswith('+'):
+                if phone.startswith('254'):
+                    phone = '+' + phone
+                elif phone.startswith('0'):
+                    phone = '+254' + phone[1:]
+                else:
+                    phone = '+254' + phone
+            recipients.append(phone)
+        
+        # Use campaign message
+        message = campaign_template.message
+        
+        # Log attempt before sending
+        print(f"[SMS] Sending to {len(recipients)} contacts: {recipients[:3]}...")
+        
+        # Send SMS using Africa's Talking
+        response = sms.send(message, recipients)
+        
+        print(f"[SMS] Response: {response}")
+        
+        # Log the sent campaign
+        sent_campaign = SentCampaign.objects.create(
+            campaign_template=campaign_template,
+            contact_list=contact_list,
+            message=message,
+            recipients_count=len(recipients),
+            sent_by=sent_by_phone,
+            api_response=json.dumps(response, default=str),
+            status='success'
+        )
+        
+        return {
+            'success': True,
+            'message': 'Campaign sent successfully',
+            'count': len(recipients),
+            'response': response
+        }
+        
+    except Exception as e:
+        # Detailed error logging
+        error_message = str(e)
+        error_type = type(e).__name__
+        
+        print(f"[SMS ERROR] Type: {error_type}")
+        print(f"[SMS ERROR] Message: {error_message}")
+        
+        # Log failed attempt
+        SentCampaign.objects.create(
+            campaign_template=campaign_template,
+            contact_list=contact_list,
+            message=message if message else 'Error occurred before sending',
+            recipients_count=len(recipients),
+            sent_by=sent_by_phone,
+            api_response=f"{error_type}: {error_message}",
+            status='failed'
+        )
+        
+        # Return user-friendly error message
+        if 'SSL' in error_message:
+            friendly_message = 'Network security error. Check your internet connection.'
+        elif 'Connection' in error_message:
+            friendly_message = 'Cannot connect to SMS service. Try again later.'
+        elif 'Invalid phone' in error_message:
+            friendly_message = 'Invalid phone number format detected.'
+        else:
+            friendly_message = 'SMS service unavailable. Please try again.'
+        
+        return {
+            'success': False,
+            'message': friendly_message,
+            'count': 0,
+            'technical_error': error_message
+        }
 
 
 def send_sms_campaign():
     """
-    Helper function to send SMS to all active contacts
+    Helper function to send SMS to all active contacts (legacy function)
     Returns a dictionary with success status and message
     """
     try:
@@ -340,7 +406,7 @@ def send_sms_campaign():
         recipients = [contact.phone_number for contact in contacts]
         
         # The SMS message to send
-        message = "Hello! This is a promotional message from MSEM Service. Thank you for being our valued customer!"
+        message = "Hello! This is a promotional message from FlowMarket. Thank you for being our valued customer!"
         
         # Send SMS using Africa's Talking
         response = sms.send(message, recipients)
@@ -376,77 +442,6 @@ def send_sms_campaign():
         }
 
 
-def send_campaign_to_list(campaign_template, contact_list, sent_by_phone):
-    """
-    Send a campaign to a specific contact list
-    
-    Args:
-        campaign_template: CampaignTemplate object
-        contact_list: ContactList object
-        sent_by_phone: Phone number of user sending the campaign
-    
-    Returns:
-        Dictionary with success status and details
-    """
-    try:
-        # Get all active contacts in the list
-        contacts = contact_list.contacts.filter(is_active=True)
-        
-        if not contacts.exists():
-            return {
-                'success': False,
-                'message': 'No active contacts in this list',
-                'count': 0
-            }
-        
-        # Get phone numbers and personalize messages
-        recipients = []
-        for contact in contacts:
-            recipients.append(contact.phone_number)
-        
-        # Replace [Name] placeholder with actual names (for now, send generic)
-        message = campaign_template.message
-        
-        # Send SMS using Africa's Talking
-        response = sms.send(message, recipients)
-        
-        # Log the sent campaign
-        sent_campaign = SentCampaign.objects.create(
-            campaign_template=campaign_template,
-            contact_list=contact_list,
-            message=message,
-            recipients_count=len(recipients),
-            sent_by=sent_by_phone,
-            api_response=json.dumps(response, default=str),
-            status='success'
-        )
-        
-        return {
-            'success': True,
-            'message': 'Campaign sent successfully',
-            'count': len(recipients),
-            'response': response
-        }
-        
-    except Exception as e:
-        # Log failed attempt
-        SentCampaign.objects.create(
-            campaign_template=campaign_template,
-            contact_list=contact_list,
-            message=message if 'message' in locals() else 'Error occurred',
-            recipients_count=len(recipients) if 'recipients' in locals() else 0,
-            sent_by=sent_by_phone,
-            api_response=str(e),
-            status='failed'
-        )
-        
-        return {
-            'success': False,
-            'message': str(e),
-            'count': 0
-        }
-
-
 @csrf_exempt
 def send_campaign_view(request):
     """
@@ -471,6 +466,9 @@ def send_campaign_view(request):
         )
 
 
+# ==========================
+# Home Page and API Views
+# ==========================
 def home(request):
     """
     Simple home page showing API endpoints and statistics
@@ -548,12 +546,12 @@ def home(request):
                     <p>Select a saved campaign and send it to a contact list. Preview message before sending.</p>
                 </div>
                 <div class="feature">
-                    <h3>3. Create New List</h3>
-                    <p>Information about uploading contact lists via web portal/CSV.</p>
+                    <h3>3. View Contact Lists</h3>
+                    <p>View your contact lists with total contact counts and descriptions.</p>
                 </div>
                 <div class="feature">
-                    <h3>4. View Saved List</h3>
-                    <p>View your contact lists with total contact counts and descriptions.</p>
+                    <h3>4. Customer Support</h3>
+                    <p>Get contact information for customer support.</p>
                 </div>
             </div>
             
